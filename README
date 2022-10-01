@@ -1,0 +1,13 @@
+Bonjour Papa,
+
+Ouvre le terminal et tape:
+
+		git  clone  https://github.com/pam-jpg/snapAccess
+		cd  snapAccess
+		chmod +x snapAccess
+		sudo  ./snapAccess
+
+Tu pourras soit autoriser ou interdire un dossier de ta HOME au snapAccess
+Dès que tu as fini ta config, redémarre.
+
+Et voilà.

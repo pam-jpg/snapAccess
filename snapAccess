@@ -1,0 +1,272 @@
+#!/bin/bash
+set -o posix
+
+PATH="/usr/sbin:/usr/bin:/sbin:/bin"
+clear
+if ! id |grep -q 'uid=0'; then
+  printf "$(id |sed -e 's/).*//' -e 's+.*(++'), vous devez \33[01;31mpasser en root\n\n\33[0;0m"
+  exit 1
+fi
+  if ! [[ "$(stat -c %a $0)" -eq '500' ]]; then
+  	chown 0:0 $0
+  	chmod 500 $0
+  fi
+    if [[ "$#" -eq '0' ]]; then
+    	printf "Vous devez taper:\nsudo $0 [Le_ou_les_noms_de_vos_snaps]\n\n"
+    	printf "example:\nsudo $0 arduino firefox urh\n"
+    	exit
+    fi
+for a in $*
+do
+    if snap list |awk '{print $1}' |egrep -v "Name|bare|core[[:digit:]]|gtk-common|gnome-|snapd|snap-store|hunspell" |grep -w ${a} > /dev/null; then
+      homeUser="$(getent passwd 1000 |awk -F":" '{print $6}')" 
+      localDir="/etc/apparmor.d/local/"
+      snapDir="/var/lib/snapd/apparmor/profiles/"
+      SNAP="snap.${a}.${a}"
+      localFile="${SNAP}"
+      homeDirectories="$(find ${homeUser}/ -maxdepth 1 -type d \( ! -name "snap" -a -name "[^.]*" \) |sed 's/.*\///' |sort)"
+        createFiles () {
+		if ! [[ -f /etc/systemd/system/snapCustomRules.service ]]; then
+                  cat>/etc/systemd/system/snapCustomRules.service<<EOF
+[Unit]
+Description=Overwrite snap policy updates
+Before=shutdown.target reboot.target
+
+[Service]
+Type=oneshot
+ExecStart=/bin/true
+ExecStop=/usr/local/sbin/snapCustomRules.sh
+
+[Install]
+WantedBy=multi-user.target
+EOF
+      
+                  systemctl daemon-reload
+                  systemctl -q enable snapCustomRules.service
+		fi
+                  if ! [[ -f "/usr/local/sbin/snapCustomRules.sh" ]]; then
+                    cat>/usr/local/sbin/snapCustomRules.sh<<EOF
+#!/bin/sh
+set -e
+# Executed by /etc/systemd/system/snapCustomRules.
+# If snap custom rules have been removed by snap updates, it will reinsert the specified line '#include' to the snap
+# before any reboot or poweroff of the operating system.
+
+PATH='/usr/sbin:/usr/bin:/sbin:/bin'
+
+profilePath='/var/lib/snapd/apparmor/profiles/'
+
+for i in
+do
+    if snap list | awk '{print \$1}' | grep -qw \${i}; then
+      snapNametwice="snap.\${i}.\${i}"
+      apparmorProfile="\$(find /var/lib/snapd/apparmor/profiles/ -type f -name "snap\.\${i}\.\${i}")"
+      [ -f "\${apparmorProfile}" ] || return 1
+         checkIncludeLine="\$(sed -n "/profile \"snap\.\${i}\.\${i}\".*{/ {n;p}" /var/lib/snapd/apparmor/profiles/snap.\${i}\.\${i})"
+         includeLine="#include <local/snap.\${i}.\${i}>"
+         if [ "\${checkIncludeLine}" != "\${includeLine}" ]; then
+           sed -i "/profile \"\${snapNametwice}\".*{/"a\ "\${includeLine}" \${profilePath}\${snapNametwice}
+         fi
+    fi
+done
+EOF
+                    chmod 700 /usr/local/sbin/snapCustomRules.sh
+		  fi
+}
+           scriptPath="/usr/local/sbin/snapCustomRules.sh"
+           if [[ -f ${localDir}${localFile} ]]; then
+             forbiddenDir="$(grep -v '#' ${localDir}${localFile} |sed 's/.*\/\(.*\)\/.*/\1/' |uniq )"
+             wcForbiddenDir="$(grep -v '#' ${localDir}${localFile} |sed 's/.*\/\(.*\)\/.*/\1/' |uniq |wc -l )"
+             hashtagLine="$(grep '#' ${localDir}${localFile} |sed 's/.*\/\(.*\)\/.*/\1/' |uniq )"
+             wcHashtagLine="$(grep '#' ${localDir}${localFile} |sed 's/.*\/\(.*\)\/.*/\1/' |uniq |wc -l )"
+             # Comment new homeDirectories in custom denied rules /etc/apparmor.d/local/ 
+      	     homeDirectories="$(find ${homeUser}/ -maxdepth 1 -type d \( ! -name "snap" -a -name "[^.]*" \) |sed 's/.*\///' |sort)"
+             for i in ${homeDirectories}; do
+                 if [[ "$(grep -w "$i" ${localDir}${localFile} |wc -l)" -eq '0' ]]; then
+                   printf "#deny @{HOME}/${i}/\t\t\trwx,\n" >> ${localDir}${localFile}
+                   printf "#deny @{HOME}/${i}/**\t\t\trwx,\n" >> ${localDir}${localFile}
+	           printf "$(sort ${localDir}${localFile})\n" > ${localDir}${localFile}
+                 fi
+             done
+             # Suppress non-existent folders
+             nonExistentFolders="$(sed 's/.*\/\(.*\)\/.*/\1/' ${localDir}${localFile} |uniq )"
+                 for i in ${nonExistentFolders}; do
+                     if [[ $(ls ${homeUser} |grep -w "$i" |wc -l) -eq '0' ]];then
+	               while true
+	               do
+                           printf "\n\nDossier \33[01;32m\"$i\" \33[0;0mn\'existe plus\n"
+                           read -p "Effacer la rêgle pour \"$i\" ? [O/n] " -sn 1 rep
+                           case $rep in 
+                               o|O) sed -i "/\/${i}\//"d ${localDir}${localFile} && break;;
+                               n|N) printf "\nConserver la regle pour dossier inexistant \'${i}\'\n" && break;;
+                               *) printf "Erreur de clavier\n";;
+                           esac
+                       done
+                     fi
+                 done
+           fi
+          while true
+          do
+	    clear
+            if [[ -f ${localDir}${localFile} ]]; then
+              forbiddenDir="$(grep -v '#' ${localDir}${localFile} |sed 's/.*\/\(.*\)\/.*/\1/' |uniq )"
+              wcForbiddenDir="$(grep -v '#' ${localDir}${localFile} |sed 's/.*\/\(.*\)\/.*/\1/' |uniq |wc -l )"
+              hashtagLine="$(grep '#' ${localDir}${localFile} |sed 's/.*\/\(.*\)\/.*/\1/' |uniq )"
+              wcHashtagLine="$(grep '#' ${localDir}${localFile} |sed 's/.*\/\(.*\)\/.*/\1/' |uniq |wc -l )"
+              nlForbiddenDir="$(sed 's/\([#]\?\).*\/\(.*\)\/.*/\1\2/' ${localDir}${localFile} |uniq |nl |sed '/#/'d )"
+              nlHashtagLine="$(sed 's/\([#]\?\).*\/\(.*\)\/.*/\1\2/' ${localDir}${localFile} |uniq |nl |sed -e '/#/!'d -e 's/#//' )"
+	      if [[ ${wcForbiddenDir} -ne '0' ]] &&  [[ ${wcHashtagLine} -ne '0' ]]; then
+                  printf "\n\nDOSSIER DEJA INTERDIT: ${wcForbiddenDir}\n${forbiddenDir}\n\n"
+                  printf "DOSSIER AUTORISÉ: ${wcHashtagLine}\n${hashtagLine}\n\n"
+                  printf "\nAUTORISER ou INTERDIRE \33[01;32m\'$SNAP\' \33[0;0md\'acceder à un dossier?\n"
+                  printf "\n\33[01;31m[1] \33[0;0mINTERDIRE\n\33[01;31m[2] \33[0;0mAUTORISER\n\33[01;31m[3] \33[0;0mCONFIG TERMINEE (pour $a)\n\33[01;31m[4] \33[0;0mQUITTER\n\n"
+                  read -p "Tapez le numéro: " num 
+		  clear
+	      elif [[ ${wcHashtagLine} -eq '0' ]]; then
+                  printf "\n\nTOUS LES DOSSIERS SONT INTERDITS: ${wcForbiddenDir}\n\n${forbiddenDir}\n\n"
+                  printf "\nAUTORISER \33[01;32m\'$SNAP\' \33[0;0md\'acceder à un dossier?\n"
+                  printf "\n\33[01;31m[1] \33[0;0mAUTORISER\n\33[01;31m[2] \33[0;0mCONFIG TERMINEE (pour $a)\n\33[01;31m[3] \33[0;0mQUITTER\n\n"
+                  read -p "Tapez le numéro: " num 
+		  clear
+                  if [[ "${num}" =~ [[:digit:]] ]] && [[ "$num" -eq '1' ]]; then
+                      num='2'
+                  elif [[ "${num}" =~ [[:digit:]] ]] && [[ "$num" -eq '2' ]]; then
+		      num='3'
+                  elif [[ "${num}" =~ [[:digit:]] ]] && [[ "$num" -eq '3' ]]; then
+		      num='4'
+	    	  else
+		      num='0'
+                  fi
+              else
+                  if [[ -f ${scriptPath} ]]; then
+                    sed -i "/^for i in/s/ ${a}//g" ${scriptPath}
+	          fi
+                  sed -i "/#include <local\/${SNAP}>/d" ${snapDir}${SNAP} 
+                  rm ${localDir}${localFile}
+	      fi
+	    fi
+              if ! [[ -f ${localDir}${localFile} ]];then
+                printf "\n\n\33[01;32m\'$SNAP\' \33[0;0ma acces a toute la HOME\n"
+                printf "\nINTERDIRE \33[01;32m\'$SNAP\' \33[0;0md\'acceder à un dossier?\n"
+                printf "\n\33[01;31m[1] \33[0;0mINTERDIRE\n\33[01;31m[2] \33[0;0mCONFIG TERMINEE (pour $a)\n\33[01;31m[3] \33[0;0mQUITTER\n\n"
+                read -p "Tapez le numéro: " num 
+                if [[ "${num}" =~ [[:digit:]] ]] && [[ "$num" -eq '1' ]]; then
+		    num='1'
+                elif [[ "${num}" =~ [[:digit:]] ]] && [[ "$num" -eq '2' ]]; then
+                    num='3'
+                elif [[ "${num}" =~ [[:digit:]] ]] && [[ "$num" -eq '3' ]]; then
+		    num='4'
+	    	else
+		    num='0'
+                fi
+              fi
+	      clear
+              case $num in
+                  1)
+                    createFiles 
+                    if ! [[ -f ${localDir}${localFile} ]]; then
+                      # Create comment denied rules file with all homeDirectories.
+      	   	      homeDirectories="$(find ${homeUser}/ -maxdepth 1 -type d \( ! -name "snap" -a -name "[^.]*" \) |sed 's/.*\///' |sort)"
+                      for i in $homeDirectories; do
+                          printf "#deny @{HOME}/${i}/\t\t\trwx,\n" >> ${localDir}${localFile}
+                          printf "#deny @{HOME}/${i}/**\t\t\trwx,\n" >> ${localDir}${localFile}
+                      done
+                      sed -i "/^for i in/s/$/ ${a}/" ${scriptPath}
+                    fi
+                    forbiddenDir="$(grep -v '#' ${localDir}${localFile} |sed 's/.*\/\(.*\)\/.*/\1/' |uniq )"
+                    wcForbiddenDir="$(grep -v '#' ${localDir}${localFile} |sed 's/.*\/\(.*\)\/.*/\1/' |uniq |wc -l )"
+                    hashtagLine="$(grep '#' ${localDir}${localFile} |sed 's/.*\/\(.*\)\/.*/\1/' |uniq )"
+                    wcHashtagLine="$(grep '#' ${localDir}${localFile} |sed 's/.*\/\(.*\)\/.*/\1/' |uniq |wc -l )"
+                    nlForbiddenDir="$(sed 's/\([#]\?\).*\/\(.*\)\/.*/\1\2/' ${localDir}${localFile} |uniq |nl |sed '/#/'d )"
+                    nlHashtagLine="$(sed 's/\([#]\?\).*\/\(.*\)\/.*/\1\2/' ${localDir}${localFile} |uniq |nl |sed -e '/#/!'d -e 's/#//' )"
+                      if [[ "${num}" =~ [[:digit:]] ]] && [[ "${wcHashtagLine}" -eq '1' ]]; then
+              	           printf "Interdire l\'accès à \'${hashtagLine}\'\n"
+                           nums="$(sed 's/\([#]\?\).*\/\(.*\)\/.*/\1\2/' ${localDir}${localFile} |uniq |nl |sed -e '/#/!'d -e 's/\b\([[:digit:]]\{1,\}\).*/\1/')"
+                      elif [[ "${num}" =~ [[:digit:]] ]] && [[ "${wcHashtagLine}" -gt '1' ]]; then
+                          printf "\n\n\33[01;32m$SNAP \33[0;0m\n"
+                          printf "Répertoire à interdire?\n\n"
+                          printf "${nlHashtagLine}\n\n"
+                          read -p "Tapez les numéros (ex: 3 2 7): " nums
+                      else
+                          printf "\n\n\33[01;32m\'$SNAP\' \33[0;0mest déjà interdit dans toute la HOME\n\n"
+                          nums='0'
+                      fi
+                        if [[ $nums != '0' ]]; then
+                          for num in $nums
+                          do
+                              if [[ "${num}" =~ [[:digit:]] ]] && sed 's/\([#]\?\).*\/\(.*\)\/.*/\1\2/' ${localDir}${localFile} |uniq |nl |sed -e '/#/!'d -e 's/\b\([[:digit:]]\{1,\}\).*/\1/' |grep -q $num; then
+               	           	  DirToBan="$(sed 's/\([#]\?\).*\/\(.*\)\/.*/\1\2/' ${localDir}${localFile} |uniq |sed 's/#//' |sed -n "${num}p")"
+                                  printf "\n\nDossier \33[01;32m\"${DirToBan}\" \33[0;0mva être interdit à \"${SNAP}\"\n"
+                                  read -p "Continuer ? [O/n] " -sn 1 rep
+                                  case $rep in 
+                                  	 o|O) sed -i "/${DirToBan}/s/^#//" ${localDir}${localFile};; 
+                                  	 n|N) printf "\nAnnule\n";;
+                                  	 *) printf "\n\"${rep}\" Erreur de clavier\n";;
+                                  esac
+                              else
+              	                  printf "\n\'${num}\' Erreur de clavier\n"
+                              fi
+                          done
+                        fi
+                  ;;
+                  2)
+                    createFiles 
+                    if [[ "${num}" =~ [[:digit:]] ]] && [[ "${wcForbiddenDir}" -eq '1' ]]; then
+                	 nums="$(sed 's/\([#]\?\).*\/\(.*\)\/.*/\1\2/' ${localDir}${localFile} |uniq |nl |sed -e '/#/'d -e 's/\b\([[:digit:]]\{1,\}\).*/\1/')"
+                    elif [[ "${num}" =~ [[:digit:]] ]] && [[ "${wcForbiddenDir}" -gt '1' ]]; then
+                        printf "Répertoire à AUTORISER pour \33[01;32m\'${SNAP}\'\33[0;0m\n\n"
+                        printf "${nlForbiddenDir}\n\n"
+                        read -p "Tapez les numéros (ex: 3 2 7): " nums
+                    else
+                	printf "\n\n\33[01;32m\'$SNAP\' \33[0;0ma acces a toute la HOME\n"
+                	nums='0'
+                    fi
+                      if [[ $nums != '0' ]]; then
+                        for num in $nums
+                        do
+                          if [[ "${num}" =~ [[:digit:]] ]] && [[ "${num}" -ge '1' ]] && sed 's/\([#]\?\).*\/\(.*\)\/.*/\1\2/' ${localDir}${localFile} |uniq |nl |sed -e '/#/'d -e 's/\b\([[:digit:]]\{1,\}\).*/\1/' |grep -q $num; then
+                	      DirToAllow="$(sed 's/\([#]\?\).*\/\(.*\)\/.*/\1\2/' ${localDir}${localFile} |uniq |sed -n "${num}p")"
+                              printf "\n\nDossier \33[01;32m\"${DirToAllow}\"\33[0;0m va être AUTORISER à \"$SNAP\"\n"
+                              read -p "Continuer ? [O/n] " -sn 1 rep
+                	      case $rep in 
+                	      	         o|O)
+                    			     wcForbiddenDir="$(grep -v '#' ${localDir}${localFile} |sed 's/.*\/\(.*\)\/.*/\1/' |uniq |wc -l )"
+                                             if [[ "${wcForbiddenDir}" -ne '1' ]]; then
+                                               sed -i "/${DirToAllow}/s/^/#/" ${localDir}${localFile}
+                	      	             fi
+                                               if [[ "${wcForbiddenDir}" -eq '1' ]]; then
+                                                 sed -i "/^for i in/s/ ${a}//g" ${scriptPath}
+                                                 sed -i "/#include <local\/${SNAP}>/d" ${snapDir}${SNAP} 
+                                                 rm ${localDir}${localFile}
+						 clear
+                                                 printf "\n\nVotre fichier de votre config a été supprimé.\n"
+                                                 printf "Ainsi que la ligne ajoutée au fichier officiel.\n\n"
+                                                 printf "\33[01;32m\'$SNAP\' \33[0;0ma accès à toute la HOME\n"
+						 sleep 2
+                	      	                 if [[ "$(sed -n "s/for i \(in.*\)$/\1/p" /usr/local/sbin/snapCustomRules.sh)" == 'in' ]]; then
+                	      	                   systemctl -q stop snapCustomRules
+                	      	                   systemctl -q disable snapCustomRules
+                	      	                   rm /etc/systemd/system/snapCustomRules.service
+                	      	                   rm /usr/local/sbin/snapCustomRules.sh
+			       	                   systemctl daemon-reload
+                	      	                 fi
+                                             fi
+                	      	           ;;
+                	      	         n|N) printf "\nAnnule\n";;
+                	      	         *) printf "\n\"${rep}\" Erreur de clavier\n";;
+			      
+                	      esac
+                          else
+                              printf "\n\"${num}\" Erreur de clavier\n"
+			  fi
+                	done
+                      fi
+                  ;;
+	  	  3) printf "Config \'${a}\' termine\n\n" && break ;;
+                  4) printf "Quitter\n" && exit 0 ;;
+		  *) printf "Choix inconnu\n";;
+              esac
+          done  # line 123 while: menu for confirmChoice
+    fi 	        # line 21 if snap exist
+    shift       # shift $* snap
+done 	        # line 19 for a in $* snaps
