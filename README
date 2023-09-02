@@ -7,7 +7,7 @@ Ouvre le terminal et tape:
 		chmod +x snapAccess
 		sudo  ./snapAccess
 
-Tu pourras soit autoriser ou interdire un dossier de ta HOME au snapAccess
-Dès que tu as fini ta config, redémarre.
+Tu pourras autoriser/interdire à des softwares (ex: firefox)
+d'acceder à des dossiers de ta /HOME.
 
 Et voilà.
